@@ -1,0 +1,87 @@
+---
+title: "File Processing"
+author: "Amelia Ritger"
+date: "2024-03-03"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load libraries
+```{r, message=FALSE}
+library(tidyverse)
+library(lubridate)
+library(janitor)
+library(here)
+```
+
+# Import and tidy data
+```{r, messages=FALSE, warning=FALSE}
+#clear environment
+rm(list = ls())
+
+# create a list of filenames in "data" directory
+filenames <- list.files("data", full.names = FALSE)
+
+# write a for loop to read in the data using read_csv and select columns 1:4
+for (i in 1:length(filenames)) {
+  #extract the characters in the filename to use as the dataframe name
+  site <- str_extract(filenames[i], "[A-Z]+")
+  #extract the year characters in the filename
+  year <- str_extract(filenames[i], "[0-9]{4}")
+  data <- read_csv(here("data", filenames[i]), col_names = TRUE, skip=1) %>%
+    rename(number = 1,
+         date_time=2,
+         temp=3,
+         batt=4) %>%
+  select(2:3)
+  #rename the dataframes to the filename
+  assign(paste0(site, "_", year), data)
+}
+
+#merge files in environment that contain "_" in the name
+data_all <- bind_rows(mget(ls(pattern = "_")))
+
+data_clean <- data_all %>%
+  mutate(date_time=mdy_hms(date_time),
+         #extract year, month, and day from date_time
+         year=year(date_time),
+         month=month(date_time),
+         day=day(date_time),
+         date=ymd(paste(year, month, day))) %>%
+  select(date_time, date, temp) %>%
+  filter(!is.na(temp))
+```
+
+## Import reference data
+```{r}
+reference <- read_csv("Intertidal_TempLogger_Swapouts_2023.csv", col_names = TRUE) %>%
+  select(1:15) %>%
+  clean_names()
+
+reference_sokh <- reference %>%
+  select("sokol_sokh") %>%
+  separate_longer_delim(c(sokol_sokh), delim = " ") %>% #For cells with multiple dates, break into two rows
+  mutate(date = mdy(sokol_sokh)) %>% #convert using lubridate
+  select(date)
+```
+
+## Cross reference and filter
+```{r}
+#If any rows in data_clean match a row in reference_sokh, then only keep that row from data_clean
+sokh_removed <- data_clean %>%
+  semi_join(reference_sokh, by = c("date" = "date")) %>%
+  select(!date)
+
+#save to csv file
+write_csv(sokh_removed, "sokh_removed.csv")
+
+sokh_clean <- data_clean %>%
+  anti_join(reference_sokh, by = c("date" = "date")) %>%
+  select(!date)
+
+write_csv(sokh_clean, "sokh_filtered.csv")
+```
+
