@@ -22,10 +22,10 @@ library(here)
 #clear environment
 rm(list = ls())
 
-# create a list of filenames in "data" directory
+# create a list of filenames in "data" folder
 filenames <- list.files("data", full.names = FALSE)
 
-# write a for loop to read in the data using read_csv and select columns 1:4
+# read in every data file in the "data" folder
 for (i in 1:length(filenames)) {
   #extract the characters in the filename to use as the dataframe name
   site <- str_extract(filenames[i], "[A-Z]+")
@@ -36,23 +36,23 @@ for (i in 1:length(filenames)) {
          date_time=2,
          temp=3,
          batt=4) %>%
-  select(2:3)
-  #rename the dataframes to the filename
-  assign(paste0(site, "_", year), data)
+  select(2:3) #only keep date_time and temp
+  assign(paste0(site, "_", year), data) #rename the dataframes to the filename
 }
 
-#merge files in environment that contain "_" in the name
+#merge files in environment that contain "_" in the name (AKA the dataframes we just created). THIS WILL ONLY WORK IF ENVRIONMENT IS CLEAR, HENCE LINE 23
 data_all <- bind_rows(mget(ls(pattern = "_")))
 
 data_clean <- data_all %>%
-  mutate(date_time=mdy_hms(date_time),
-         #extract year, month, and day from date_time
-         year=year(date_time),
-         month=month(date_time),
-         day=day(date_time),
-         date=ymd(paste(year, month, day))) %>%
-  select(date_time, date, temp) %>%
-  filter(!is.na(temp))
+  mutate(date_time=mdy_hms(date_time), # make date_time a datetime object
+         time_no_seconds = format(date_time, "%H:%M"), #remove seconds from date_time
+         year=year(date_time), # extract year
+         month=month(date_time), #extract month
+         day=day(date_time), #extract day
+         date=ymd(paste(year, month, day)), #create date object
+         date_time_format=paste0(year, "-", month, "-", day, " ", time_no_seconds)) %>% #create formatted date and time object - cannot be plotted with ggplot
+  select(date_time, date, date_time_format, temp) %>% # only keep these columns
+  filter(!is.na(temp)) #remove NA temperature rows
 ```
 
 ## Import reference data
@@ -62,26 +62,27 @@ reference <- read_csv("Intertidal_TempLogger_Swapouts_2023.csv", col_names = TRU
   clean_names()
 
 reference_sokh <- reference %>%
-  select("sokol_sokh") %>%
-  separate_longer_delim(c(sokol_sokh), delim = " ") %>% #For cells with multiple dates, break into two rows
-  mutate(date = mdy(sokol_sokh)) %>% #convert using lubridate
-  select(date)
+  select("sokol_sokh") %>% #only keep sokol because that's the only data I have access to
+  separate_longer_delim(c(sokol_sokh), delim = " ") %>% # For cells with multiple dates, break into two rows
+  mutate(date = mdy(sokol_sokh)) %>% #convert the dates to date object
+  select(date) #only keep this column
 ```
 
 ## Cross reference and filter
 ```{r}
-#If any rows in data_clean match a row in reference_sokh, then only keep that row from data_clean
+#If any rows in data_clean match a row in reference_sokh, then only keep that row from data_clean. THESE ARE THE ROWS ASSOCIATED WITH THE SWAPOUT DATES.
 sokh_removed <- data_clean %>%
   semi_join(reference_sokh, by = c("date" = "date")) %>%
-  select(!date)
+  select(!date) #STEVE - if you want to only keep your YYYY-MM-DD HH:MM column, then add !date_time within select() here too. And you can rename the column you keep to date_time or whatever you want using mutate(). See my code above for example.
 
 #save to csv file
 write_csv(sokh_removed, "sokh_removed.csv")
 
+#Now, do the opposite of what you just did... THESE ARE THE ROWS (DATA) YOU WANT TO KEEP.
 sokh_clean <- data_clean %>%
   anti_join(reference_sokh, by = c("date" = "date")) %>%
   select(!date)
 
+#save to csv file
 write_csv(sokh_clean, "sokh_filtered.csv")
 ```
-
